@@ -1,0 +1,27 @@
+server:
+  type: default
+  applicationConnectors:
+    - type: http
+      port: 8090
+  adminConnectors:
+    - type: http
+      port: 8091
+
+logging:
+  loggers:
+    dev.dropwizard.bundler: debug
+
+reflections:
+  basePackages:
+    - samples.dw.bundler
+  modelPackages:
+    - samples.dw.bundler.model
+  refPackage: samples.dw.bundler.refmodel
+
+redis:
+  host: localhost
+  port: 6379
+
+elastic:
+  cluster.name: imdbExample
+  path.data: target/data

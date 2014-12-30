@@ -1,0 +1,23 @@
+server:
+  type: default
+  applicationConnectors:
+    - type: http
+      port: 8090
+  adminConnectors:
+    - type: http
+      port: 8091
+
+logging:
+  loggers:
+    dev.dropwizard.bundler: trace
+
+reflections:
+  basePackages:
+    - samples.dw.bundler
+  modelPackages:
+    - samples.dw.bundler.model
+  refPackage: samples.dw.bundler.ref
+
+elastic:
+  cluster.name: cluster-1
+  path.data: target/data
