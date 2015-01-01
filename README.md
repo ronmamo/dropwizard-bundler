@@ -6,7 +6,7 @@
 
 Dropwizard-Bundler is a set of [Dropwizard](https://github.com/dropwizard/dropwizard) extensions, which provides 
  * [Guice](https://github.com/HubSpot/dropwizard-guice) support and auto discovery of modules, bundles, resources and more ([1](https://github.com/ronmamo/dropwizard-bundler/blob/master/bundler/src/main/java/dev/dropwizard/bundler/BundlerCommand.java#L72))
- * Auto Rest support and swagger ui for @Redis and @Elastic annotated model classes - ([1](https://github.com/ronmamo/dropwizard-bundler/blob/master/redis/src/main/java/dev/dropwizard/bundler/redis/RedisClientResource.java) [2](https://github.com/ronmamo/dropwizard-bundler/blob/master/elastic/src/main/java/dev/dropwizard/bundler/elastic/ElasticClientResource.java))
+ * Auto Rest support and [Swagger](http://swagger.io/) for @Redis and @Elastic annotated model classes - ([1](https://github.com/ronmamo/dropwizard-bundler/blob/master/redis/src/main/java/dev/dropwizard/bundler/redis/RedisClientResource.java) [2](https://github.com/ronmamo/dropwizard-bundler/blob/master/elastic/src/main/java/dev/dropwizard/bundler/elastic/ElasticClientResource.java))
  * Auto persist based on model usage - ([1](https://github.com/ronmamo/dropwizard-bundler/blob/master/README.md#refmodel))
  
 ----
@@ -44,7 +44,7 @@ public class ImdbInfo {
     ...
 }
 ```
-Enables you to use RedisClient/ElasticClient to easily persist the object:
+Enables you to use RedisClient/ElasticClient for basic peristence:
 
 ```
 @Inject RedisClient redisClient;
@@ -53,29 +53,37 @@ Enables you to use RedisClient/ElasticClient to easily persist the object:
 ...
   redisClient.put(imdbInfo);
   elasticClient.put(imdbInfo);
+  
+  redisClient.get(ImdbInfo.class, "id1");
 ...
-```
-And Then get it back:
-
-```
-  redisClient.get(ImdbInfo.class, <id>);
 ```
 
 #####RefModel#####
 
-Now, in case you want to find an object based on some property, you can use:
+RedisClient also provides ```getByProperty```:
 
 ```
   List<ImdbInfo> list = 
       redisClient.getByProperty(ImdbInfo.class, RefModel.ImdbInfo.Title.name(), "Pulp Fiction");
 ```
-Where RefModel is an auto generated enum consists of ImdbInfo properties, which can be addressed statically.
+Where RefModel is an auto generated class, representing model class properties - and can be addressed statically
 
 ```
 //generated ...
 public interface RefModel {
     @RefPackage("my.app.model...")
-    public enum ImdbInfo { imdbID, Title, Year, Director, ... }
+    public enum ImdbInfo { imdbID, Title, Year, Director, Plot }
 }
 ```
-All is needed to index a model object by any property is just to use ```getByProperty``` somewhere in your code. Behind the scenes, when the application starts up, it looks up for code usages (!) of RefModel.* (such as above), and takes care of auto persist.
+
+The properties that are actually used in the code, generated into RefScheme class:
+
+```
+//generated ...
+public interface RefScheme {
+    @RefPackage("my.app.model...")
+    public enum ImdbInfo { Title, Director } //only title and director
+}
+```
+
+And each property is used as an index when persisting - for Redis as keys ([1](https://github.com/ronmamo/dropwizard-bundler/blob/master/redis/src/main/java/dev/dropwizard/bundler/redis/RedisRefModelBundle.java#L24)), and for Elastic as mapping ([2](https://github.com/ronmamo/dropwizard-bundler/blob/master/elastic/src/main/java/dev/dropwizard/bundler/elastic/ElasticRefModelBundle.java#L26))
