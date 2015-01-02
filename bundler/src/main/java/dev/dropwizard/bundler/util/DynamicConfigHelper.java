@@ -1,4 +1,4 @@
-package dev.dropwizard.bundler.features;
+package dev.dropwizard.bundler.util;
 
 import com.google.common.collect.Sets;
 

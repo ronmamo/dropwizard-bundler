@@ -12,10 +12,6 @@ logging:
     samples.dw.bundler: debug
 
 reflections:
-  basePackages:
-    - samples.dw.bundler
-  modelPackages:
-    - samples.dw.bundler.model
   refPackage: samples.dw.bundler.ref
 
 redis:

@@ -1,5 +1,6 @@
 package dev.dropwizard.bundler.refmodel;
 
+import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
 import com.google.common.hash.Hashing;
@@ -27,11 +28,9 @@ public class RefModelSerializer implements Serializer {
     private static final String dotSeparator = ".";
     private static final String tokenSeparator = "_";
     private final String[] basePackages;
-    private String className;
 
-    public RefModelSerializer(String[] basePackages, String className) {
+    public RefModelSerializer(String[] basePackages) {
         this.basePackages = basePackages;
-        this.className = className;
     }
 
     public Reflections read(InputStream inputStream) {
@@ -48,15 +47,9 @@ public class RefModelSerializer implements Serializer {
     }
 
     public File save(Multimap<String, String> mmap, String name) {
-        if (name.endsWith("/")) {
-            name = name.substring(0, name.length() - 1); //trim / at the end
-        }
-
-        String filename = name.replace(".", "/") + "/" + className + ".java";
-        File file = prepareFile(filename);
-
+        String className = name.substring(name.lastIndexOf(".") + 1);
         String packageName = name.substring(name.lastIndexOf("/") + 1);
-        String className = this.className;
+        packageName = packageName.substring(0, packageName.lastIndexOf("."));
 
         String string = toString(mmap);
 
@@ -73,6 +66,8 @@ public class RefModelSerializer implements Serializer {
         sb.append("}\n");
 
         try {
+            String filename = name.replace(".", "/") + ".java";
+            File file = prepareFile(filename);
             Files.write(sb.toString(), new File(filename), Charset.defaultCharset());
             return file;
         } catch (IOException e) {
@@ -91,8 +86,18 @@ public class RefModelSerializer implements Serializer {
         List<String> keys = Lists.newArrayList(mmap.keySet());
         Collections.sort(keys);
 
+        String commonPackage = null;
+        for (String key : keys) {
+            String pkg = key.substring(0, key.lastIndexOf('.'));
+            commonPackage = commonPackage == null ? pkg : Strings.commonPrefix(commonPackage, pkg);
+        }
+
         for (String fqn : keys) {
             String fqn1 = fqn;
+            if (fqn1.startsWith(commonPackage)) {
+                fqn1 = fqn1.substring(commonPackage.length() + 1);
+            }
+
             for (String basePackage : basePackages) {
                 if (fqn1.startsWith(basePackage)) {
                     fqn1 = fqn1.substring(basePackage.length() + 1);

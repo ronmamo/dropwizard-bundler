@@ -2,16 +2,14 @@ package dev.dropwizard.bundler.features;
 
 import com.google.common.collect.FluentIterable;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Multimap;
-import com.google.common.collect.Sets;
 import com.google.inject.Module;
 import dev.dropwizard.bundler.BundlerCommand;
+import dev.dropwizard.bundler.util.ReflectionsHelper;
+import io.dropwizard.Application;
 import io.dropwizard.Bundle;
 import io.dropwizard.ConfiguredBundle;
 import io.dropwizard.setup.Bootstrap;
 import io.dropwizard.setup.Environment;
-import org.hibernate.validator.constraints.NotEmpty;
-import org.reflections.ReflectionUtils;
 import org.reflections.Reflections;
 import org.reflections.scanners.MemberUsageScanner;
 import org.reflections.scanners.SubTypesScanner;
@@ -23,7 +21,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Modifier;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
@@ -38,9 +35,10 @@ public class ReflectionsBundle implements ConfiguredBundle<ReflectionsBundle.Con
 
     private Reflections reflections;
     private ImmutableSet<Class<?>> discoveredTypes;
+    private Application<? extends io.dropwizard.Configuration> application;
 
     public static class Configuration {
-        public Ref reflections;
+        public Ref reflections = new Ref();
 
         public static class Ref {
             /** auto extend packages (Module -> AbstractModule, Bundle -> AssetsBundle) */
@@ -50,20 +48,26 @@ public class ReflectionsBundle implements ConfiguredBundle<ReflectionsBundle.Con
             /** auto scan packages (dw bundler core) */
             public String[] corePackages = {"dev.dropwizard.bundler"};
 
-            /** auto scan packages (app) */
-            @NotEmpty public String[] basePackages;
+            /** auto scan packages (app), defaults to application's package */
+            public String[] basePackages;
 
-            /** auto scan packages (model) */
-            @NotEmpty public String[] modelPackages;
+            /** auto scan packages (model), defaults to application's package */
+            public String[] modelPackages;
 
-            /** usage scan packages (refmodel) */
+            /** usage scan packages (refmodel), defaults to basePackage.refmodel */
             @Nullable public String refPackage;
-
-            public String[][] includePackages = {extPackages, corePackages, basePackages};
 
             public Class[] includeSubTypes = {Module.class, Bundle.class, ConfiguredBundle.class};
 
             public List<Class<?>> excludeSubTypes = Arrays.asList(ReflectionsBundle.class, BundlerCommand.class, BundlerCommand.BootstrapInstancesModule.class);
+
+            public void applyDefaultsFromApplication(String basePackage) {
+                if (basePackage != null) {
+                    if (basePackages == null) basePackages = new String[]{basePackage};
+                    if (modelPackages == null) modelPackages = new String[]{basePackage};
+                    if (refPackage == null) refPackage = basePackage + ".refmodel";
+                }
+            }
         }
     }
 
@@ -77,14 +81,17 @@ public class ReflectionsBundle implements ConfiguredBundle<ReflectionsBundle.Con
 
     @Override
     public void initialize(Bootstrap<?> bootstrap) {
+        application = bootstrap.getApplication();
     }
 
     @Override
     public void run(Configuration conf, Environment env) throws Exception {
         if (reflections == null) {
             Configuration.Ref refConf = conf.reflections;
+            refConf.applyDefaultsFromApplication(application.getClass().getPackage().getName());
             reflections = scanTypes(refConf);
-            expandSupertypes(refConf);
+            ReflectionsHelper.expandSupertypes(reflections, SubTypesScanner.class,
+                    new String[][]{refConf.extPackages, refConf.corePackages, refConf.basePackages});
             scanUsages(refConf);
             discoverTypes(refConf);
         }
@@ -92,7 +99,7 @@ public class ReflectionsBundle implements ConfiguredBundle<ReflectionsBundle.Con
 
     private Reflections scanTypes(Configuration.Ref refConf) {
         FilterBuilder filter = new FilterBuilder();
-        for (String[] packages : refConf.includePackages) {
+        for (String[] packages : new String[][]{refConf.extPackages, refConf.corePackages, refConf.basePackages}) {
             if (packages != null) {
                 for (String prefix : packages) {
                     filter.add(new FilterBuilder.Include(FilterBuilder.prefix(prefix)));
@@ -109,19 +116,6 @@ public class ReflectionsBundle implements ConfiguredBundle<ReflectionsBundle.Con
                 new TypeAnnotationsScanner().filterResultsBy(filter));
 
         return new Reflections(builder);
-    }
-
-    private void expandSupertypes(Configuration.Ref refConf) {
-        Multimap<String, String> mmap = reflections.getStore().get(SubTypesScanner.class.getSimpleName());
-        for (String key : Sets.newHashSet(mmap.keySet())) {
-            if (!mmap.containsValue(key)) {
-                for (String extPackage : refConf.extPackages) {
-                    if (key.startsWith(extPackage)) {
-                        expandSupertypes(mmap, key, ReflectionUtils.forName(key));
-                    }
-                }
-            }
-        }
     }
 
     private void scanUsages(Configuration.Ref refConf) {
@@ -156,21 +150,4 @@ public class ReflectionsBundle implements ConfiguredBundle<ReflectionsBundle.Con
         }
     }
 
-    private void expandSupertypes(Multimap<String, String> mmap, String key, Class<?> type) {
-        for (Class<?> supertype : supertypes(type)) {
-            if (mmap.put(supertype.getName(), key)) {
-                log.debug("expanded subtype {} -> {}", supertype.getName(), key);
-            }
-            expandSupertypes(mmap, supertype.getName(), supertype);
-        }
-    }
-
-    private List<Class<?>> supertypes(Class<?> type) {
-        Class<?> superclass = type.getSuperclass();
-        Class<?>[] interfaces = type.getInterfaces();
-        List<Class<?>> result = new ArrayList<>();
-        if (superclass != Object.class && superclass != null) result.add(superclass);
-        if (interfaces != null && interfaces.length > 0) result.addAll(Arrays.asList(interfaces));
-        return result;
-    }
 }

@@ -53,7 +53,7 @@ public class SwaggerBundle implements ConfiguredBundle<Configuration> {
                 addMapping(PATH + "/*");
 
         Set<Class<?>> apiClasses = reflections.getTypesAnnotatedWith(Api.class);
-        configure(configuration, "localhost", "API", apiClasses, new DefaultJaxrsApiReader());
+        configure(configuration, "localhost", "api", apiClasses, new DefaultJaxrsApiReader());
     }
 
     public void configure(Configuration configuration, String host, String domain, Collection<Class<?>> modelClasses, Multimap<Class<?>, String> propertyMap) {

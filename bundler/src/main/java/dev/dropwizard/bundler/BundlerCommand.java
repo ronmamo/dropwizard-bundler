@@ -7,7 +7,7 @@ import com.google.inject.Injector;
 import com.google.inject.Module;
 import com.hubspot.dropwizard.guice.GuiceBundle;
 import dev.dropwizard.bundler.features.BundlesOrder;
-import dev.dropwizard.bundler.features.DynamicConfigHelper;
+import dev.dropwizard.bundler.util.DynamicConfigHelper;
 import dev.dropwizard.bundler.features.PartialConfigFactory;
 import dev.dropwizard.bundler.features.ReflectionsBundle;
 import io.dropwizard.Application;
@@ -73,6 +73,7 @@ public class BundlerCommand<T extends io.dropwizard.Configuration> extends Serve
         try {
             //scan
             reflectionsBundle = new ReflectionsBundle();
+            reflectionsBundle.initialize(bootstrap);
             ReflectionsBundle.Configuration refConf = configFactory.buildConfig(reflectionsBundle.getClass(), bootstrap);
             reflectionsBundle.run(refConf, null);
 

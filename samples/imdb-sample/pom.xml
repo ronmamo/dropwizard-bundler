@@ -25,7 +25,6 @@
         <dependency>
             <groupId>com.sun.jersey</groupId>
             <artifactId>jersey-client</artifactId>
-            <scope>runtime</scope>
         </dependency>
 
         <dependency>
@@ -37,11 +36,6 @@
             <groupId>org.hamcrest</groupId>
             <artifactId>hamcrest-all</artifactId>
             <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.sun.jersey</groupId>
-            <artifactId>jersey-client</artifactId>
-            <version>1.18.1</version>
         </dependency>
     </dependencies>
 
@@ -57,7 +51,8 @@
                         <goals><goal>execute</goal></goals>
                         <configuration>
                             <source>
-                                new dev.dropwizard.bundler.refmodel.GenerateRefModel(project, "imdb-example.yml")
+                                new dev.dropwizard.bundler.refmodel.GenerateRefModel(
+                                        project, "samples.dw.bundler", "imdb-example.yml")
                             </source>
                         </configuration>
                     </execution>

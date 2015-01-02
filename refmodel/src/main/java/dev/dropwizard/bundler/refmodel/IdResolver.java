@@ -1,7 +1,7 @@
 package dev.dropwizard.bundler.refmodel;
 
 import com.google.inject.ImplementedBy;
-import dev.dropwizard.bundler.features.DynamicConfigHelper;
+import dev.dropwizard.bundler.util.DynamicConfigHelper;
 
 import javax.annotation.Nullable;
 import javax.inject.Inject;

@@ -12,10 +12,6 @@ logging:
     dev.dropwizard.bundler: trace
 
 reflections:
-  basePackages:
-    - samples.dw.bundler
-  modelPackages:
-    - samples.dw.bundler.model
   refPackage: samples.dw.bundler.ref
 
 elastic:

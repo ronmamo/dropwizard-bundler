@@ -2,12 +2,12 @@ package dev.dropwizard.bundler.refmodel;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.Equivalence;
-import com.google.common.base.Joiner;
+import com.google.common.base.Predicates;
 import com.google.common.collect.*;
-import com.google.common.hash.*;
+import com.google.common.hash.Hashing;
 import com.google.common.io.Files;
-import dev.dropwizard.bundler.features.ReflectionsBundle;
 import dev.dropwizard.bundler.features.PartialConfigFactory;
+import dev.dropwizard.bundler.features.ReflectionsBundle;
 import io.dropwizard.configuration.ConfigurationSourceProvider;
 import io.dropwizard.configuration.FileConfigurationSourceProvider;
 import io.dropwizard.jackson.Jackson;
@@ -24,6 +24,7 @@ import javax.validation.Validator;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.reflect.Modifier;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.charset.Charset;
@@ -31,6 +32,10 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+
+import static com.google.common.base.Predicates.not;
+import static com.google.common.collect.FluentIterable.from;
+import static org.reflections.ReflectionUtils.withClassModifier;
 
 /**
  * Generate RefModel and RefScheme for given model package
@@ -62,7 +67,7 @@ import java.util.List;
 public class GenerateRefModel {
     private static final Logger log = LoggerFactory.getLogger(GenerateRefModel.class);
 
-    public GenerateRefModel(MavenProject project, String configPath) {
+    public GenerateRefModel(MavenProject project, String basePackage, String configPath) {
 
         PartialConfigFactory configFactory = new PartialConfigFactory(null);
 
@@ -81,6 +86,8 @@ public class GenerateRefModel {
             ReflectionsBundle.Configuration.Ref refConf = configFactory.
                     buildConfiguration(ReflectionsBundle.Configuration.class, configPath, configurationSourceProvider,
                             objectMapper, validator).reflections;
+            refConf.applyDefaultsFromApplication(basePackage);
+            Reflections.log = null;
 
             generate(refConf, project.getBuild().getSourceDirectory(), classLoader);
         } catch (Exception e) {
@@ -90,54 +97,95 @@ public class GenerateRefModel {
    }
 
     public void generate(ReflectionsBundle.Configuration.Ref refConf, String srcDir, ClassLoader classLoader) throws Exception {
-        String refPath = srcDir + "/" + refConf.refPackage;
-
         // generate RefModel
-        Reflections reflectionsRefModel = new Reflections(refConf.modelPackages, new TypeElementsScanner(), classLoader);
-        File refModelFile1 = new File(refPath + "/" + "RefModel");
-        String existingSha11 = null;
-        if (refModelFile1.exists()) {
-            existingSha11 = checkValidSha1("RefModel", refModelFile1, existingSha11);
+        Multimap<String, String> refModel = getRefModel(refConf, classLoader);
+        String refModelPath = srcDir + "/" + refConf.refPackage + ".RefModel";
+        if (isChangedSHA1(refModel, refModelPath, refConf)) {
+            save(refModelPath, refModel, refConf);
         }
 
-        File refModel = new RefModelSerializer(refConf.modelPackages, "RefModel").save(reflectionsRefModel, refPath);
-        log.info("Saved RefModel in " + refModel.getAbsolutePath());
-
-        // generate RefScheme usages map
-        Multimap<String, String> usagesMap = buildRefModelUsagesMap(refConf, classLoader);
-        File refModelFile = new File(refPath + "/" + "RefScheme");
-        String existingSha1 = null;
-        if (refModelFile.exists()) {
-            existingSha1 = checkValidSha1("RefScheme", refModelFile, existingSha1);
+        // generate RefScheme
+        Multimap<String, String> refScheme = getRefScheme(refConf, classLoader);
+        String refSchemePath = srcDir + "/" + refConf.refPackage + ".RefScheme";
+        if (isChangedSHA1(refScheme, refSchemePath, refConf)) {
+            MapDifference<Object, Collection<?>> difference = checkForSchemeDiff(refScheme, refConf.refPackage + ".RefScheme");
+//            throw new UnsupportedOperationException("\nScheme diff\n\tLeft:\n\t" + difference.entriesOnlyOnLeft() +
+//                    "\n\tRight:\n\t" + difference.entriesOnlyOnRight());
+            log.info("\nScheme diff\n\tLeft:\n\t" + difference.entriesOnlyOnLeft() +
+                                "\n\tRight:\n\t" + difference.entriesOnlyOnRight());
+            save(refSchemePath, refScheme, refConf);
         }
-        checkForSchemeDiff(refConf, usagesMap);
-
-        // save RefScheme
-        File refScheme = new RefModelSerializer(refConf.modelPackages, "RefScheme").save(usagesMap, refPath);
-        log.info("Saved RefScheme in " + refScheme.getAbsolutePath());
     }
 
-    private String checkValidSha1(String refFile, File refModelFile, String existingSha1) throws IOException {
+    private Multimap<String, String> getRefModel(ReflectionsBundle.Configuration.Ref refConf, ClassLoader classLoader) {
+        Reflections reflections = new Reflections(refConf.basePackages, refConf.modelPackages, refConf.corePackages, classLoader);
+        ImmutableSet<Class<?>> refModels = from(reflections.getTypesAnnotatedWith(RefModel.class)).
+                filter(not(withClassModifier(Modifier.ABSTRACT | Modifier.INTERFACE))).
+                filter(withClassModifier(Modifier.PUBLIC)).
+                toSet();
+        FilterBuilder filter = new FilterBuilder();
+        for (Class<?> refModel : refModels) {
+            filter.add(Predicates.equalTo(refModel.getName()));
+        }
+        Reflections reflectionsRefModel = new Reflections(refConf.modelPackages, new TypeElementsScanner().
+                filterResultsBy(filter), classLoader);
+        return reflectionsRefModel.getStore().get(TypeElementsScanner.class.getSimpleName());
+    }
+
+    private Multimap<String, String> getRefScheme(ReflectionsBundle.Configuration.Ref refConf, ClassLoader classLoader) {
+        Reflections reflectionsRefScheme =
+                new Reflections(refConf.basePackages, refConf.refPackage,
+                        new MemberUsageScanner().
+                                filterResultsBy(new FilterBuilder().
+                                        includePackage(refConf.refPackage).
+                                        exclude(FilterBuilder.prefix(refConf.refPackage) + "\\.\\$VALUES")),
+                        classLoader);
+
+        Multimap<String, String> mmap = ArrayListMultimap.create();
+        Multimap<String, String> schemeMap = reflectionsRefScheme.getStore().get(MemberUsageScanner.class.getSimpleName());
+        for (String key : schemeMap.keySet()) {
+            int i = key.lastIndexOf(".");
+            String type = key.substring(0, i);
+            String element = key.substring(i + 1);
+            String schemeKey = ReflectionUtils.forName(type).getAnnotation(RefPackage.class).value() +
+                    type.replace(refConf.refPackage + ".RefModel", "").replace("$", ".");
+            mmap.put(schemeKey, element);
+        }
+        return mmap;
+    }
+
+    private boolean isChangedSHA1(Multimap<String, String> mmap, String refPath, ReflectionsBundle.Configuration.Ref refConf) throws IOException {
+        File refModelFile1 = new File(refPath.replace(".", "/") + ".java");
+        String existingSha11 = getFileSha1(refModelFile1);
+        RefModelSerializer serializer = new RefModelSerializer(refConf.modelPackages);
+        String string = serializer.toString(mmap);
+        String newSha1 = Hashing.sha1().hashString(string, Charset.defaultCharset()).toString();
+        return !newSha1.equals(existingSha11);
+    }
+
+    private void save(String refPath, Multimap<String, String> mmap, ReflectionsBundle.Configuration.Ref refConf) {
+        RefModelSerializer serializer = new RefModelSerializer(refConf.modelPackages);
+        File refModel = serializer.save(mmap, refPath);
+        log.info("Saved " + refModel.getAbsolutePath());
+    }
+
+    private String getFileSha1(File refModelFile) throws IOException {
         List<String> refModelLines = Files.readLines(refModelFile, Charset.defaultCharset());
         int i = refModelLines.get(1).indexOf("//SHA1: ");
         if (i != -1) {
-            existingSha1 = refModelLines.get(1).substring(i);
-            String sha1 = Hashing.sha1().hashString(Joiner.on("\n").join(refModelLines.subList(2, refModelLines.size())), Charset.defaultCharset()).toString();
-            if (!sha1.equals(existingSha1)) {
-                throw new RuntimeException(refFile + " file seem to be corrupted, found non matching SHA1 value in" +
-                        " existing " + refFile + " file [" + refModelFile.getCanonicalPath() + "]");
-            }
+            return refModelLines.get(1).substring(i + "//SHA1: ".length());
+        } else {
+            return null;
         }
-        return existingSha1;
     }
 
-    private void checkForSchemeDiff(ReflectionsBundle.Configuration.Ref refConf, Multimap<String, String> usagesMap) {
+    private MapDifference<Object, Collection<?>> checkForSchemeDiff(Multimap<String, String> usagesMap, String schemeClass) {
         HashMultimap<Object, Object> existingUsageMap = HashMultimap.create();
         Class<?> existingRefScheme = null;
         try {
-            existingRefScheme = ReflectionUtils.forName(refConf.refPackage + ".RefScheme");
+            existingRefScheme = ReflectionUtils.forName(schemeClass);
         } catch (Exception e) {
-            return;
+            return null;
         }
         for (Class<?> scheme : existingRefScheme.getDeclaredClasses()) {
             String fqn = scheme.getAnnotation(RefPackage.class).value() + "." + scheme.getSimpleName();
@@ -167,7 +215,7 @@ public class GenerateRefModel {
                 }
         );
 
-        if (!difference.areEqual()) {
+//        if (!difference.areEqual()) {
 //            log.info("Scheme diff - " + difference.toString());
 //            Map<Object, MapDifference.ValueDifference<Collection<?>>> diff = difference.entriesDiffering();
 //            for (Object key : diff.keySet()) {
@@ -179,31 +227,9 @@ public class GenerateRefModel {
 //                Sets.SetView<Object> removed = Sets.difference(previous, current);
 //
 //            }
-            throw new UnsupportedOperationException("\nScheme diff\n\tLeft:\n\t" + difference.entriesOnlyOnLeft() +
-                    "\n\tRight:\n\t" + difference.entriesOnlyOnRight());
-        }
-    }
-
-    private Multimap<String, String> buildRefModelUsagesMap(ReflectionsBundle.Configuration.Ref refConf, ClassLoader classLoader) {
-        Reflections reflectionsRefScheme =
-                new Reflections(refConf.basePackages, refConf.refPackage,
-                        new MemberUsageScanner().
-                                filterResultsBy(new FilterBuilder().
-                                        includePackage(refConf.refPackage).
-                                        exclude(FilterBuilder.prefix(refConf.refPackage) + "\\.\\$VALUES")),
-                        classLoader);
-
-        Multimap<String, String> mmap = ArrayListMultimap.create();
-        Multimap<String, String> schemeMap = reflectionsRefScheme.getStore().get(MemberUsageScanner.class.getSimpleName());
-        for (String key : schemeMap.keySet()) {
-            int i = key.lastIndexOf(".");
-            String type = key.substring(0, i);
-            String element = key.substring(i + 1);
-            String schemeKey = ReflectionUtils.forName(type).getAnnotation(RefPackage.class).value() +
-                    type.replace(refConf.refPackage + ".RefModel", "").replace("$", ".");
-            mmap.put(schemeKey, element);
-        }
-        return mmap;
+//            throw new UnsupportedOperationException("\nScheme diff\n\tLeft:\n\t" + difference.entriesOnlyOnLeft() +
+//                    "\n\tRight:\n\t" + difference.entriesOnlyOnRight());
+        return difference;
     }
 
     private URLClassLoader mavenClassLoader(MavenProject project) throws Exception {

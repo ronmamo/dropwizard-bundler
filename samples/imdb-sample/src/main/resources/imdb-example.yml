@@ -11,13 +11,6 @@ logging:
   loggers:
     dev.dropwizard.bundler: debug
 
-reflections:
-  basePackages:
-    - samples.dw.bundler
-  modelPackages:
-    - samples.dw.bundler.model
-  refPackage: samples.dw.bundler.refmodel
-
 redis:
   host: localhost
   port: 6379

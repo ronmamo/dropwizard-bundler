@@ -40,7 +40,8 @@
                         <goals><goal>execute</goal></goals>
                         <configuration>
                             <source>
-                                new dev.dropwizard.bundler.refmodel.GenerateRefModel(project, "elastic-example.yml")
+                                new dev.dropwizard.bundler.refmodel.GenerateRefModel(
+                                        project, "samples.dw.bundler", "elastic-example.yml")
                             </source>
                         </configuration>
                     </execution>
